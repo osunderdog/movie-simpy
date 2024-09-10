@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "sim-pile"
+version = "0.1.0"
+description = ""
+authors = ["Bruce W. Lowther <bwlowther@micron.com>"]
+readme = "README.md"
+package-mode = false
+
+[[tool.poetry.source]]
+name = "micron"
+url = "https://artifactory.micron.com/artifactory/api/pypi/smai-pypi-prod-virtual/simple"
+priority = "primary"
+
+[tool.poetry.dependencies]
+python = "^3.12.0"
+simpy = "^4.1.1"
+pydantic = "^2.9.1"
+pandas = "^2.2.2"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
