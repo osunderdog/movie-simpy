@@ -7,7 +7,8 @@ Movies line
 import logging
 import random
 import statistics
-from dataclasses import dataclass
+
+from pydantic import BaseModel, Field
 from datetime import timedelta
 from itertools import groupby, product
 
@@ -60,6 +61,7 @@ def run_theater(env, num_cashiers, num_servers, num_ushers, wait_times):
     for moviegoer in range(3):
         env.process(go_to_movies(env, moviegoer, theater, wait_times))
 
+    #why 27?
     for _ in range(27):
         yield env.timeout(0.20)  # Wait a bit before generating new moviegoer
 
@@ -70,41 +72,37 @@ def run_theater(env, num_cashiers, num_servers, num_ushers, wait_times):
     return wait_times
 
 
-def calculate_wait_time(wait_times):
-    # print([round(t) for t in wait_times])
-    average_wait = statistics.mean(wait_times)
-    # Pretty print the results
-    return timedelta(minutes=average_wait)
-
 
 def run_simulation(num_cashiers, num_servers, num_ushers):
     wait_times = []
     # Run the simulation
     env = simpy.Environment()
-    env.process(
-        run_theater(env, num_cashiers, num_servers, num_ushers, wait_times)
-    )
+    env.process(run_theater(env, num_cashiers, num_servers, num_ushers, wait_times))
     env.run()
     return wait_times
 
 
-def calculate_average_wait_time_for_config(
-    num_cashiers, num_servers, num_ushers, num_simulations
-):
-    all_wait_times = []
-    for _ in range(num_simulations):
-        all_wait_times += run_simulation(num_cashiers, num_servers, num_ushers)
 
-    return calculate_wait_time(all_wait_times).total_seconds()
+class EmployeeConfig(BaseModel):
+    num_cashiers: int = Field(description="Number of cachiers available")
+    num_servers: int = Field(description="Number of servers that are available.")
+    num_ushers: int = Field(description="Number ofushers available")
+    average_time: float = Field(default=None, description="how long it took to run people through the system")
 
+    #TODO keep times and the use property to calculate average.
 
-def generate_employee_config(max_employees):
-    num_places = 3
-    return (
-        config
-        for config in product(range(1, max_employees + 1), repeat=num_places)
-        if sum(config) <= max_employees
-    )
+    @property
+    def total_employees(self):
+        return sum((self.num_cashiers, self.num_servers, self.num_ushers))
+
+    def calculate_average_wait_time_for_config(self, num_simulations):
+        self.average_time = timedelta(minutes=statistics.mean(run_simulation(self.num_cashiers, self.num_servers, self.num_ushers))).total_seconds()
+
+    @classmethod
+    def generate_employee_config(cls, max_employees):
+        """Generate the parameters for an EmployeeConfig. number of places is a little strange from the docs: For example, product(A, repeat=4) means the same as product(A, A, A, A).  So in this case, build a tuple of three items."""
+        num_places = 3
+        return [cls(num_cashiers=config[0], num_servers=config[1], num_ushers=config[2]) for config in product(range(1, max_employees + 1), repeat=num_places) if sum(config) <= max_employees]
 
 
 def main():
@@ -112,26 +110,19 @@ def main():
     random.seed(42)
 
     # Run simulation
-    average_time_by_employee_config = []
 
     max_employees = 10
     num_simulations = 10
+    emp_config_list = EmployeeConfig.generate_employee_config(max_employees)
 
-    for num_cashiers, num_servers, num_ushers in generate_employee_config(
-        max_employees
-    ):
-        average_time = calculate_average_wait_time_for_config(
-            num_cashiers, num_servers, num_ushers, num_simulations,
-        )
-        average_time_by_employee_config.append(
-            EmployeeConfig(num_cashiers, num_servers, num_ushers, average_time)
-        )
+    # Run the simulation and retrieve the average wait time from each run back into the EmployeeConfig.
+    [ec.calculate_average_wait_time_for_config(num_simulations) for ec in emp_config_list]
 
     def total_employees_key(e):
         return e.total_employees
 
-    average_time_by_employee_config.sort(key=total_employees_key)
-    for k, g in groupby(average_time_by_employee_config, total_employees_key):
+    emp_config_list.sort(key=lambda e: e.total_employees)
+    for k, g in groupby(emp_config_list, total_employees_key):
         if True:
             g = list(g)
             for group_item in g:
@@ -139,18 +130,6 @@ def main():
         best_config = min(g, key=lambda e: e.average_time)
         logging.info(f"For {k} employees, best config is {best_config}\n")
 
-
-@dataclass
-class EmployeeConfig:
-    num_cashiers: int
-    num_servers: int
-    num_ushers: int
-
-    average_time: float
-
-    @property
-    def total_employees(self):
-        return sum((self.num_cashiers, self.num_servers, self.num_ushers))
 
 
 if __name__ == "__main__":
