@@ -1,3 +1,7 @@
+# from: https://github.com/tomasmenito/movie-simpy.git
+# backtracking from this article:
+# https://realpython.com/simpy-simulating-with-python/
+
 """
 Movies line
 
@@ -58,6 +62,8 @@ def go_to_movies(env, moviegoer, theater, wait_times):
 def run_theater(env, num_cashiers, num_servers, num_ushers, wait_times):
     theater = Theater(env, num_cashiers, num_servers, num_ushers)
 
+    # Generate 30 movie goers.
+    # First three are simultaneously then at a slow trickle?
     for moviegoer in range(3):
         env.process(go_to_movies(env, moviegoer, theater, wait_times))
 
