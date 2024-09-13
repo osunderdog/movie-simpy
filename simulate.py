@@ -16,6 +16,7 @@ from typing import List
 from pydantic import BaseModel, Field
 from datetime import timedelta
 from itertools import groupby, product
+from functools import cached_property
 
 import simpy
 
@@ -26,9 +27,6 @@ class EmployeeConfig(BaseModel):
     num_cashiers: int = Field(description="Number of cachiers available")
     num_servers: int = Field(description="Number of servers that are available.")
     num_ushers: int = Field(description="Number ofushers available")
-    average_time: float = Field(default=None, description="how long it took to run people through the system")
-
-    #TODO keep times and the use property to calculate average.
 
     @property
     def total_employees(self):
@@ -49,17 +47,25 @@ class Theater:
     Usher: Number of people that can check a ticket and admit them to the movie."""
     def __init__(self, employee_config: EmployeeConfig, env = None):
         # Pysim execution environment
+        self.employee_config = employee_config
         self.env = env if env else simpy.Environment()
         # the limited number of cashiers that are available in the Theater.
-        self.cashier = simpy.Resource(self.env, employee_config.num_cashiers)
+        self.cashier = simpy.Resource(self.env, self.employee_config.num_cashiers)
 
         # the limited number of servers that are available in the Theater.
-        self.server = simpy.Resource(self.env, employee_config.num_servers)
+        self.server = simpy.Resource(self.env, self.employee_config.num_servers)
 
         # the limited number of ushers that are available in the Theater.
-        self.usher = simpy.Resource(self.env, employee_config.num_ushers)
+        self.usher = simpy.Resource(self.env, self.employee_config.num_ushers)
 
         self.wait_times = []
+
+    def __repr__(self):
+        return f"Theater({self.employee_config.num_cashiers=}, {self.employee_config.num_servers=}, {self.employee_config.num_ushers=}, {self.total_employees=})"
+
+    @property
+    def total_employees(self):
+        return self.employee_config.total_employees
 
     def purchase_ticket(self, moviegoer):
         """Purchasing a ticket from the theater takes some time.  Yield the random duration needed to purchase a ticket."""
@@ -73,13 +79,13 @@ class Theater:
         """Selling food takes some time  Yield the random duration needed to sell food."""
         yield self.env.timeout(random.randint(1, 5))
 
+    @cached_property
     def avg_wait_time(self):
         return statistics.mean(self.wait_times)
 
 
     def go_to_movies(self, moviegoer):
         # Moviegoer arrives at the theater
-        logging.debug(f"Moviegoer {moviegoer} arrives at the theater")
         arrival_time = self.env.now
 
         with self.cashier.request() as request:
@@ -127,7 +133,6 @@ def main():
     random.seed(42)
 
     max_employees = 10
-    num_simulations = 10
      # create a bunch of theaters
     # Run the simulation and retrieve the average wait time from each run back into the EmployeeConfig.
     theaters = [Theater(employee_config=ec) for ec in  EmployeeConfig.generate_employee_config(max_employees)]
@@ -135,11 +140,8 @@ def main():
         t.run()
 
     for k, g in groupby(theaters, lambda t: t.employee_config.total_employees):
-        g = list(g)
-        for group_item in g:
-            logging.debug(group_item)
-        best_config = min(g, key=lambda t: t.employee_config.total_employees)
-        logging.info(f"For {k} employees, best config is {best_config}\n")
+        best_config = min(g, key=lambda t: t.avg_wait_time)
+        logging.info(f"For {k} employees, best config is {best_config}: {best_config.avg_wait_time}\n")
 
 
 
