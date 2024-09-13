@@ -12,6 +12,8 @@ import logging
 import random
 import statistics
 from typing import List
+from pathlib import Path
+from datetime import datetime
 
 from pydantic import BaseModel, Field
 from datetime import timedelta
@@ -23,7 +25,7 @@ import pandas as pd
 
 import simpy
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 
 class EmployeeConfig(BaseModel):
@@ -139,13 +141,16 @@ class Theater:
         return self
 
 
-
+def timestamp():
+    #function to print timstamp for filename
+    return datetime.now().strftime("%Y%m%d%H%M%S")
 
 def main():
     # Setup
+    figure_dir = Path('./plots')
     random.seed(42)
 
-    max_employees = 10
+    max_employees = 40
      # create a bunch of theaters
     # Run the simulation and retrieve the average wait time from each run back into the EmployeeConfig.
     theaters = [t.run() for t in (Theater(employee_config=ec) for ec in  EmployeeConfig.generate_employee_config(max_employees))]
@@ -161,7 +166,10 @@ def main():
 
     # Plot a line.  x axis = employee count y axis = minimum duration.
     plt.figure(figsize=(10,10))
-    sns.lineplot(data=df, x='total_employees', y='wait_times')
+    # rotate x axis label by 90 degrees
+    plt.xticks(rotation=90)
+    sns.boxplot(data=df, x='total_employees', y='wait_times', showfliers=False)
+    plt.savefig(figure_dir / f"{timestamp()}_boxplot.png")
     plt.show()
 
 if __name__ == "__main__":
