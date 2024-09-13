@@ -16,6 +16,9 @@ python = "^3.12.0"
 simpy = "^4.1.1"
 pydantic = "^2.9.1"
 pandas = "^2.2.2"
+matplotlib = "^3.9.2"
+seaborn = "^0.13.2"
+numpy = "^2.1.1"
 
 
 [build-system]

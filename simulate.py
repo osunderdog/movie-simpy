@@ -17,6 +17,9 @@ from pydantic import BaseModel, Field
 from datetime import timedelta
 from itertools import groupby, product
 from functools import cached_property
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
 
 import simpy
 
@@ -39,6 +42,9 @@ class EmployeeConfig(BaseModel):
         theaters = [cls(num_cashiers=config[0], num_servers=config[1], num_ushers=config[2]) for config in product(range(1, max_employees + 1), repeat=num_places) if sum(config) <= max_employees]
         theaters.sort(key=lambda e: e.total_employees)
         return theaters
+
+class Theater_Metrics(BaseModel):
+    pass
 
 class Theater:
     """Simulate a theater with some limited resources.
@@ -136,12 +142,11 @@ def main():
     max_employees = 10
      # create a bunch of theaters
     # Run the simulation and retrieve the average wait time from each run back into the EmployeeConfig.
-    theaters = (Theater(employee_config=ec) for ec in  EmployeeConfig.generate_employee_config(max_employees))
-    # for t in theaters:
-    #     t.run()
+    theaters = [t.run() for t in (Theater(employee_config=ec) for ec in  EmployeeConfig.generate_employee_config(max_employees))]
 
-    for k, g in groupby(theaters, lambda t: t.employee_config.total_employees):
-        best_config = min((t.run() for t in theaters), key=lambda t: t.avg_wait_time)
+    for k, g in groupby(theaters, key=lambda t: t.total_employees):
+        # logging.debug(f"group: {k} count: {len(list(g))}")
+        best_config = min(g, key=lambda t: t.avg_wait_time)
         logging.info(f"For {k} employees, best config is {best_config}: {best_config.avg_wait_time}\n")
 
 
