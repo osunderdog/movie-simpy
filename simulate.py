@@ -51,13 +51,13 @@ class Theater:
         # Pysim execution environment
         self.env = env if env else simpy.Environment()
         # the limited number of cashiers that are available in the Theater.
-        self.cashier = simpy.Resource(env, employee_config.num_cashiers)
+        self.cashier = simpy.Resource(self.env, employee_config.num_cashiers)
 
         # the limited number of servers that are available in the Theater.
-        self.server = simpy.Resource(env, employee_config.num_servers)
+        self.server = simpy.Resource(self.env, employee_config.num_servers)
 
         # the limited number of ushers that are available in the Theater.
-        self.usher = simpy.Resource(env, employee_config.num_ushers)
+        self.usher = simpy.Resource(self.env, employee_config.num_ushers)
 
         self.wait_times = []
 
@@ -79,6 +79,7 @@ class Theater:
 
     def go_to_movies(self, moviegoer):
         # Moviegoer arrives at the theater
+        logging.debug(f"Moviegoer {moviegoer} arrives at the theater")
         arrival_time = self.env.now
 
         with self.cashier.request() as request:
