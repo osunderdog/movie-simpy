@@ -15,7 +15,7 @@ from typing import List
 
 from pydantic import BaseModel, Field
 from datetime import timedelta
-from itertools import groupby, product
+from itertools import groupby, product, chain
 from functools import cached_property
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -43,8 +43,15 @@ class EmployeeConfig(BaseModel):
         theaters.sort(key=lambda e: e.total_employees)
         return theaters
 
-class Theater_Metrics(BaseModel):
-    pass
+class Theater_Metric(BaseModel):
+    wait_times: List[float] = Field(default_factory=list, description="the time consumed between arrival and entering in to the theater.")
+
+    @cached_property
+    def avg_wait_time(self):
+        return statistics.mean(self.wait_times)
+
+
+
 
 class Theater:
     """Simulate a theater with some limited resources.
@@ -63,8 +70,7 @@ class Theater:
 
         # the limited number of ushers that are available in the Theater.
         self.usher = simpy.Resource(self.env, self.employee_config.num_ushers)
-
-        self.wait_times = []
+        self.metric = Theater_Metric()
 
     def __repr__(self):
         return f"Theater({self.employee_config.num_cashiers=}, {self.employee_config.num_servers=}, {self.employee_config.num_ushers=}, {self.total_employees=})"
@@ -87,7 +93,7 @@ class Theater:
 
     @cached_property
     def avg_wait_time(self):
-        return statistics.mean(self.wait_times)
+        return statistics.mean(self.metric.wait_times)
 
 
     def go_to_movies(self, moviegoer):
@@ -109,7 +115,7 @@ class Theater:
                 yield self.env.process(self.sell_food(moviegoer))
 
         # Moviegoer heads into the theater
-        self.wait_times.append(self.env.now - arrival_time)
+        self.metric.wait_times.append(self.env.now - arrival_time)
 
     def incoming_moviegoers_gen(self):
         """Generate incoming moviegoers.  Start with some that are waiting at open, but then a stream at some arrival rate."""
@@ -146,10 +152,17 @@ def main():
 
     for k, g in groupby(theaters, key=lambda t: t.total_employees):
         # logging.debug(f"group: {k} count: {len(list(g))}")
-        best_config = min(g, key=lambda t: t.avg_wait_time)
-        logging.info(f"For {k} employees, best config is {best_config}: {best_config.avg_wait_time}\n")
+        best_config = min(g, key=lambda t: t.metric.avg_wait_time)
+        logging.info(f"For {k} employees, best config is {best_config}: {best_config.metric.avg_wait_time}\n")
 
+    df = pd.DataFrame(data=[dict(chain(t.employee_config.model_dump().items(),t.metric.model_dump().items())) for t in theaters])
+    df = df.explode('wait_times', ignore_index=True)
+    df['total_employees'] = df[['num_cashiers','num_ushers', 'num_servers']].sum(axis=1)
 
+    # Plot a line.  x axis = employee count y axis = minimum duration.
+    plt.figure(figsize=(10,10))
+    sns.lineplot(data=df, x='total_employees', y='wait_times')
+    plt.show()
 
 if __name__ == "__main__":
     main()
