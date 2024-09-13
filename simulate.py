@@ -105,8 +105,8 @@ class Theater:
         # Moviegoer heads into the theater
         self.wait_times.append(self.env.now - arrival_time)
 
-    def run_gen(self):
-
+    def incoming_moviegoers_gen(self):
+        """Generate incoming moviegoers.  Start with some that are waiting at open, but then a stream at some arrival rate."""
         # Generate 30 movie goers.
         # First three are simultaneously then at a slow trickle?
         for moviegoer in range(3):
@@ -122,8 +122,9 @@ class Theater:
 
 
     def run(self):
-        self.env.process(self.run_gen())
+        self.env.process(self.incoming_moviegoers_gen())
         self.env.run()
+        return self
 
 
 
@@ -135,12 +136,12 @@ def main():
     max_employees = 10
      # create a bunch of theaters
     # Run the simulation and retrieve the average wait time from each run back into the EmployeeConfig.
-    theaters = [Theater(employee_config=ec) for ec in  EmployeeConfig.generate_employee_config(max_employees)]
-    for t in theaters:
-        t.run()
+    theaters = (Theater(employee_config=ec) for ec in  EmployeeConfig.generate_employee_config(max_employees))
+    # for t in theaters:
+    #     t.run()
 
     for k, g in groupby(theaters, lambda t: t.employee_config.total_employees):
-        best_config = min(g, key=lambda t: t.avg_wait_time)
+        best_config = min((t.run() for t in theaters), key=lambda t: t.avg_wait_time)
         logging.info(f"For {k} employees, best config is {best_config}: {best_config.avg_wait_time}\n")
 
 
