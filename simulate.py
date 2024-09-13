@@ -11,7 +11,7 @@ Movies line
 import logging
 import random
 import statistics
-from typing import List
+from typing import List, Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime
 
@@ -50,6 +50,7 @@ class Theater_Metric(BaseModel):
     usher_queue: List[int] = Field(default_factory=list)
     cashier_queue: List[int] = Field(default_factory=list)
     server_queue: List[int] = Field(default_factory=list)
+    customer_count: int = Field(default=0, description="The number of customers that were able to enter the theater.")
 
     @cached_property
     def avg_wait_time(self):
@@ -59,13 +60,19 @@ class Theater_Metric(BaseModel):
 
 
 class Theater:
+    DEFAULT_PRELOAD_CUSTOMERS = 3
+    DEFAULT_CASHIER_BALK_LIMIT = 15
     """Simulate a theater with some limited resources.
     Cashier: Number of people that can provide a ticket
     Server: Number of people that can vend food.
     Usher: Number of people that can check a ticket and admit them to the movie."""
-    def __init__(self, employee_config: EmployeeConfig, env = None):
+    def __init__(self, employee_config: EmployeeConfig, env = None, cashier_balk_limit: Optional[int] = None, preload_customer_count: Optional[int] = None):
         # Pysim execution environment
         self.employee_config = employee_config
+        # a customer will walk away if there are too many people in line for cashier
+        self.cashier_balk_limit: int = cashier_balk_limit if cashier_balk_limit else self.DEFAULT_CASHIER_BALK_LIMIT
+        self.preload_customer_count: int = preload_customer_count if preload_customer_count else self.DEFAULT_PRELOAD_CUSTOMERS
+
         self.env = env if env else simpy.Environment()
         # the limited number of cashiers that are available in the Theater.
         self.cashier = simpy.Resource(self.env, self.employee_config.num_cashiers)
@@ -100,44 +107,49 @@ class Theater:
     def avg_wait_time(self):
         return statistics.mean(self.metric.wait_times)
 
+    def get_result(self) -> Dict[str,Any]:
+        """return a dictionary that contains all the data that might be interesting in a data frame."""
+        return dict(chain(self.employee_config.model_dump().items(),
+                          self.metric.model_dump().items()))
 
     def go_to_movies(self, moviegoer):
         # Moviegoer arrives at the theater
         arrival_time = self.env.now
 
-        with self.cashier.request() as request:
-            yield request
-            yield self.env.process(self.purchase_ticket(moviegoer))
-
-        with self.usher.request() as request:
-            yield request
-            yield self.env.process(self.check_ticket(moviegoer))
-
-        # The customer may or may not want food.  50/50 chance.
-        if random.choice([True, False]):
-            with self.server.request() as request:
+        if len(self.cashier.queue) < self.cashier_balk_limit:
+            # The line is short enough that the customer wants to enter into the queue for a cachier.
+            with self.cashier.request() as request:
                 yield request
-                yield self.env.process(self.sell_food(moviegoer))
+                yield self.env.process(self.purchase_ticket(moviegoer))
 
-        # Moviegoer heads into the theater
+            with self.usher.request() as request:
+                yield request
+                yield self.env.process(self.check_ticket(moviegoer))
 
-        #capture the time it took them to go from arrival to entering the theater.
-        self.metric.wait_times.append(self.env.now - arrival_time)
-        # Capture the cashier queue, usher queue, and server queue when a moviegoer enters the theater.
-        self.metric.cashier_queue.append(len(self.cashier.queue))
-        self.metric.usher_queue.append(len(self.usher.queue))
-        self.metric.server_queue.append(len(self.server.queue))
+            # The customer may or may not want food.  50/50 chance.
+            if random.choice([True, False]):
+                with self.server.request() as request:
+                    yield request
+                    yield self.env.process(self.sell_food(moviegoer))
+
+            # Moviegoer heads into the theater
+            self.metric.customer_count = self.metric.customer_count + 1
+            #capture the time it took them to go from arrival to entering the theater.
+            self.metric.wait_times.append(self.env.now - arrival_time)
+            # Capture the cashier queue, usher queue, and server queue when a moviegoer enters the theater.
+            self.metric.cashier_queue.append(len(self.cashier.queue))
+            self.metric.usher_queue.append(len(self.usher.queue))
+            self.metric.server_queue.append(len(self.server.queue))
+        else:
+            # logging.info(f"Customer Balked!")
+            pass
 
     def incoming_moviegoers_gen(self):
         """Generate incoming moviegoers.  Start with some that are waiting at open, but then a stream at some arrival rate."""
-        # Generate 30 movie goers.
-        # First three are simultaneously then at a slow trickle?
-        for moviegoer in range(3):
-            self.env.process(self.go_to_movies(moviegoer))
-
-        for moviegoer in count(3):
+        for moviegoer in count(0):
             # infinite count starting at three.  This will cause cashier queue to grow indefinitely...
-            yield self.env.timeout(0.20)  # Wait a bit before generating new moviegoer
+            if moviegoer > self.preload_customer_count:
+                yield self.env.timeout(0.20)  # Wait a bit before generating new moviegoer
             self.env.process(self.go_to_movies(moviegoer))
 
 
@@ -151,27 +163,48 @@ def timestamp():
     #function to print timstamp for filename
     return datetime.now().strftime("%Y%m%d%H%M%S")
 
+
+
+def plot_wait_time_Data(df,figure_dir:Path):
+    # Explode out the wait times and queue counts. for a plot or two.
+    df = df.explode(['wait_times', 'cashier_queue', 'usher_queue', 'server_queue'], ignore_index=True)
+    # Plot a line.  x axis = employee count y axis = minimum duration.
+    plt.figure(figsize=(10, 10))
+    # rotate x axis label by 90 degrees
+    plt.xticks(rotation=90)
+    sns.boxplot(data=df, x='total_employees', y='wait_times', showfliers=False)
+    plt.savefig(figure_dir / f"{timestamp()}_wait_time_boxplot.png")
+    plt.show()
+
+def plot_customer_count_boxplot(df_serviced, figure_dir:Path):
+    plt.figure(figsize=(10, 10))
+    # rotate x axis label by 90 degrees
+    plt.xticks(rotation=90)
+    sns.boxplot(data=df_serviced, x='total_employees', y='customer_count', showfliers=False)
+    plt.savefig(figure_dir / f"{timestamp()}_customer_count_boxplot.png")
+    plt.show()
+
 def main():
     # Setup
     figure_dir = Path('./plots')
     random.seed(42)
 
-    max_employees = 5
+    max_employees = 15
      # create a bunch of theaters
     # Run the simulation and retrieve the average wait time from each run back into the EmployeeConfig.
     theaters = [t.run() for t in (Theater(employee_config=ec) for ec in  EmployeeConfig.generate_employee_config(max_employees))]
 
-    df = pd.DataFrame(data=[dict(chain(t.employee_config.model_dump().items(),t.metric.model_dump().items())) for t in theaters])
+    df = pd.DataFrame(data=[t.get_result() for t in theaters])
     df['total_employees'] = df[['num_cashiers','num_ushers', 'num_servers']].sum(axis=1)
-    df = df.explode(['wait_times', 'cashier_queue', 'usher_queue', 'server_queue'], ignore_index=True)
+
+    plot_wait_time_Data(df.drop(axis=1, labels=['customer_count']),
+                        figure_dir=figure_dir)
 
     # Plot a line.  x axis = employee count y axis = minimum duration.
-    plt.figure(figsize=(10,10))
-    # rotate x axis label by 90 degrees
-    plt.xticks(rotation=90)
-    sns.boxplot(data=df, x='total_employees', y='wait_times', showfliers=False)
-    plt.savefig(figure_dir / f"{timestamp()}_boxplot.png")
-    plt.show()
+    plot_customer_count_boxplot(df.drop(axis=1, labels=['wait_times', 'cashier_queue', 'usher_queue', 'server_queue']),
+                                figure_dir=figure_dir)
+
+
 
 if __name__ == "__main__":
     main()
