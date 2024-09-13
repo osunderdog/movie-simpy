@@ -17,7 +17,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 from datetime import timedelta
-from itertools import groupby, product, chain
+from itertools import groupby, product, chain, repeat, count
 from functools import cached_property
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -47,6 +47,9 @@ class EmployeeConfig(BaseModel):
 
 class Theater_Metric(BaseModel):
     wait_times: List[float] = Field(default_factory=list, description="the time consumed between arrival and entering in to the theater.")
+    usher_queue: List[int] = Field(default_factory=list)
+    cashier_queue: List[int] = Field(default_factory=list)
+    server_queue: List[int] = Field(default_factory=list)
 
     @cached_property
     def avg_wait_time(self):
@@ -117,7 +120,13 @@ class Theater:
                 yield self.env.process(self.sell_food(moviegoer))
 
         # Moviegoer heads into the theater
+
+        #capture the time it took them to go from arrival to entering the theater.
         self.metric.wait_times.append(self.env.now - arrival_time)
+        # Capture the cashier queue, usher queue, and server queue when a moviegoer enters the theater.
+        self.metric.cashier_queue.append(len(self.cashier.queue))
+        self.metric.usher_queue.append(len(self.usher.queue))
+        self.metric.server_queue.append(len(self.server.queue))
 
     def incoming_moviegoers_gen(self):
         """Generate incoming moviegoers.  Start with some that are waiting at open, but then a stream at some arrival rate."""
@@ -126,18 +135,15 @@ class Theater:
         for moviegoer in range(3):
             self.env.process(self.go_to_movies(moviegoer))
 
-        #why 27?
-        for _ in range(27):
+        for moviegoer in count(3):
+            # infinite count starting at three.  This will cause cashier queue to grow indefinitely...
             yield self.env.timeout(0.20)  # Wait a bit before generating new moviegoer
-
-            # Almost done!...
-            moviegoer += 1
             self.env.process(self.go_to_movies(moviegoer))
 
 
     def run(self):
         self.env.process(self.incoming_moviegoers_gen())
-        self.env.run()
+        self.env.run(until=90)
         return self
 
 
@@ -150,19 +156,14 @@ def main():
     figure_dir = Path('./plots')
     random.seed(42)
 
-    max_employees = 40
+    max_employees = 5
      # create a bunch of theaters
     # Run the simulation and retrieve the average wait time from each run back into the EmployeeConfig.
     theaters = [t.run() for t in (Theater(employee_config=ec) for ec in  EmployeeConfig.generate_employee_config(max_employees))]
 
-    for k, g in groupby(theaters, key=lambda t: t.total_employees):
-        # logging.debug(f"group: {k} count: {len(list(g))}")
-        best_config = min(g, key=lambda t: t.metric.avg_wait_time)
-        logging.info(f"For {k} employees, best config is {best_config}: {best_config.metric.avg_wait_time}\n")
-
     df = pd.DataFrame(data=[dict(chain(t.employee_config.model_dump().items(),t.metric.model_dump().items())) for t in theaters])
-    df = df.explode('wait_times', ignore_index=True)
     df['total_employees'] = df[['num_cashiers','num_ushers', 'num_servers']].sum(axis=1)
+    df = df.explode(['wait_times', 'cashier_queue', 'usher_queue', 'server_queue'], ignore_index=True)
 
     # Plot a line.  x axis = employee count y axis = minimum duration.
     plt.figure(figsize=(10,10))
