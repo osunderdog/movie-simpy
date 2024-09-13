@@ -78,7 +78,7 @@ class Theater:
         yield self.env.timeout(random.randint(1, 3))
 
     def check_ticket(self, moviegoer):
-        """Checking the ticket takes some time.  The time taken is fixed at 20 time units"""
+        """Checking the ticket takes some time.  The time taken is fixed at 0.05 time units"""
         yield self.env.timeout(3 / 60)
 
     def sell_food(self, moviegoer):
